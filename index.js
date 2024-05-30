@@ -8,13 +8,23 @@ const port = 8080;
 // Middleware
 app.use(bodyParser.json());
 
-// MongoDB connection string (commented out for now)
-// const dbURI = 'mongodb://mongo:27017/testdb';
+// MongoDB connection string
+const dbURI = 'mongodb://mongo:27017/testdb';
 
-// Connect to MongoDB (commented out for now)
-// mongoose.connect(dbURI, { useNewUrlParser: true, useUnifiedTopology: true })
-//   .then(() => console.log('Connected to MongoDB'))
-//   .catch(err => console.log(err));
+// Connect to MongoDB
+mongoose.connect(dbURI, { useNewUrlParser: true, useUnifiedTopology: true })
+  .then(() => console.log('Connected to MongoDB'))
+  .catch(err => console.log(err));
+
+// Define the Book model
+const bookSchema = new mongoose.Schema({
+  title: String,
+  author: String,
+  publishedDate: Date,
+  pages: Number
+});
+
+const Book = mongoose.model('Book', bookSchema);
 
 // Routes
 app.get('/', (req, res) => {
@@ -23,6 +33,60 @@ app.get('/', (req, res) => {
 
 app.get('/testAPI', (req, res) => {
   res.send('Hello from testAPI!');
+});
+
+// Create a book
+app.post('/books', async (req, res) => {
+  const book = new Book(req.body);
+  try {
+    const savedBook = await book.save();
+    res.status(201).json(savedBook);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+// Get all books
+app.get('/books', async (req, res) => {
+  try {
+    const books = await Book.find();
+    res.json(books);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Get a book by ID
+app.get('/books/:id', async (req, res) => {
+  try {
+    const book = await Book.findById(req.params.id);
+    if (!book) return res.status(404).json({ message: 'Book not found' });
+    res.json(book);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Update a book
+app.put('/books/:id', async (req, res) => {
+  try {
+    const updatedBook = await Book.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    if (!updatedBook) return res.status(404).json({ message: 'Book not found' });
+    res.json(updatedBook);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+// Delete a book
+app.delete('/books/:id', async (req, res) => {
+  try {
+    const deletedBook = await Book.findByIdAndDelete(req.params.id);
+    if (!deletedBook) return res.status(404).json({ message: 'Book not found' });
+    res.json({ message: 'Book deleted' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 });
 
 // Start the server

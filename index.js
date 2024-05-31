@@ -37,11 +37,14 @@ app.get('/testAPI', (req, res) => {
 
 // Create a book
 app.post('/books', async (req, res) => {
+  console.log("Test1")
   const book = new Book(req.body);
   try {
     const savedBook = await book.save();
+    console.log("test2")
     res.status(201).json(savedBook);
   } catch (err) {
+    console.log(err)
     res.status(400).json({ message: err.message });
   }
 });

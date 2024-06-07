@@ -26,6 +26,15 @@ const bookSchema = new mongoose.Schema({
 
 const Book = mongoose.model('Book', bookSchema);
 
+const userSchema = new mongoose.Schema({
+  username: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  email: { type: String, required: true, unique: true },
+  role: { type: String, default: 'user' }
+});
+
+const User = mongoose.model('User', userSchema);
+
 // Routes
 app.get('/', (req, res) => {
   res.send('Welcome to the Book API');

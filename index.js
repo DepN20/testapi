@@ -19,6 +19,20 @@ mongoose.connect(dbURI, { useNewUrlParser: true, useUnifiedTopology: true })
   .then(() => console.log('Connected to MongoDB'))
   .catch(err => console.log('Failed to connect to MongoDB:', err));
 
+// Define the User model
+const userSchema = new mongoose.Schema({
+  username: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  email: { type: String, required: true, unique: true },
+  role: { type: String, default: 'user' }
+});
+
+userSchema.methods.isAdmin = function() {
+  return this.role === 'admin';
+};
+
+const User = mongoose.model('User', userSchema);
+
 // Define the Book model
 const bookSchema = new mongoose.Schema({
   title: String,
@@ -30,14 +44,19 @@ const bookSchema = new mongoose.Schema({
 
 const Book = mongoose.model('Book', bookSchema);
 
-const userSchema = new mongoose.Schema({
-  username: { type: String, required: true, unique: true },
-  password: { type: String, required: true },
-  email: { type: String, required: true, unique: true },
-  role: { type: String, default: 'user' }
-});
+// Authentication middleware
+const authenticateJWT = (req, res, next) => {
+  const token = req.header('Authorization');
+  if (!token) return res.status(401).json({ message: 'Access denied' });
 
-const User = mongoose.model('User', userSchema);
+  try {
+    const decoded = jwt.verify(token.split(' ')[1], jwtSecret);
+    req.user = decoded;
+    next();
+  } catch (err) {
+    res.status(400).json({ message: 'Invalid token' });
+  }
+};
 
 // Routes
 app.get('/', (req, res) => {
@@ -88,22 +107,48 @@ app.post('/login', async (req, res) => {
   }
 });
 
+// Update user account
+app.put('/users/update', authenticateJWT, async (req, res) => {
+  try {
+    const { oldPassword, newPassword, email } = req.body;
+
+    // Find the user by ID
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    // Verify old password
+    const isPasswordValid = await bcrypt.compare(oldPassword, user.password);
+    if (!isPasswordValid) return res.status(400).json({ message: 'Invalid old password' });
+
+    // Hash the new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update user information
+    user.password = hashedPassword;
+    if (email) user.email = email;
+
+    const updatedUser = await user.save();
+    res.json(updatedUser);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
 // Create a book
-app.post('/books', async (req, res) => {
-  const book = new Book(req.body);
+app.post('/books', authenticateJWT, async (req, res) => {
+  const book = new Book({ ...req.body, createdBy: req.user.id });
   try {
     const savedBook = await book.save();
     res.status(201).json(savedBook);
   } catch (err) {
-    console.log(err);
     res.status(400).json({ message: err.message });
   }
 });
 
 // Get all books
-app.get('/books', async (req, res) => {
+app.get('/books', authenticateJWT, async (req, res) => {
   try {
-    const books = await Book.find();
+    const books = await Book.find().populate('createdBy', 'username');
     res.json(books);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -111,9 +156,9 @@ app.get('/books', async (req, res) => {
 });
 
 // Get a book by ID
-app.get('/books/:id', async (req, res) => {
+app.get('/books/:id', authenticateJWT, async (req, res) => {
   try {
-    const book = await Book.findById(req.params.id);
+    const book = await Book.findById(req.params.id).populate('createdBy', 'username');
     if (!book) return res.status(404).json({ message: 'Book not found' });
     res.json(book);
   } catch (err) {
@@ -122,10 +167,17 @@ app.get('/books/:id', async (req, res) => {
 });
 
 // Update a book
-app.put('/books/:id', async (req, res) => {
+app.put('/books/:id', authenticateJWT, async (req, res) => {
   try {
+    const book = await Book.findById(req.params.id);
+    if (!book) return res.status(404).json({ message: 'Book not found' });
+
+    // Only allow the owner or an admin to update the book
+    if (book.createdBy.toString() !== req.user.id && !req.user.role === 'admin') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
     const updatedBook = await Book.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    if (!updatedBook) return res.status(404).json({ message: 'Book not found' });
     res.json(updatedBook);
   } catch (err) {
     res.status(400).json({ message: err.message });
@@ -133,30 +185,22 @@ app.put('/books/:id', async (req, res) => {
 });
 
 // Delete a book
-app.delete('/books/:id', async (req, res) => {
+app.delete('/books/:id', authenticateJWT, async (req, res) => {
   try {
-    const deletedBook = await Book.findByIdAndDelete(req.params.id);
-    if (!deletedBook) return res.status(404).json({ message: 'Book not found' });
+    const book = await Book.findById(req.params.id);
+    if (!book) return res.status(404).json({ message: 'Book not found' });
+
+    // Only allow the owner or an admin to delete the book
+    if (book.createdBy.toString() !== req.user.id && !req.user.role === 'admin') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    await book.remove();
     res.json({ message: 'Book deleted' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
-
-const authenticateJWT = (req, res, next) => {
-  const token = req.header('Authorization');
-  if (!token) return res.status(401).json({ message: 'Access denied' });
-
-  try {
-    const decoded = jwt.verify(token.split(' ')[1], jwtSecret);
-    req.user = decoded;
-    next();
-  } catch (err) {
-    res.status(400).json({ message: 'Invalid token' });
-  }
-};
-
-app.use('/books', authenticateJWT);
 
 // Start the server
 app.listen(port, () => console.log(`Server running on port ${port}`));
